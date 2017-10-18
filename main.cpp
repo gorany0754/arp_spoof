@@ -271,7 +271,6 @@ int main(int argc, char* argv[])
 	for(int i=0;i<s_num;i++){
 		make_arp_packet(fake_packet,i, sender_mac[i], my_mac, arp_type, arp_hrd_type, arp_pro_type, ETHER_ADDR_LEN, 
 				IP_ADDR_LEN, arp_opcode, my_mac, target_ip[i], sender_mac[i], sender_ip[i]);
-		print_packet(fake_packet,i);
 	}
 
 	//set thread_data
